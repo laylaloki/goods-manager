@@ -64,7 +64,7 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
     <label for="budget">予算（円）</label><input id="budget" type="number" inputmode="numeric" placeholder="例：10000">
     <div class="row between" style="margin-top:10px"><span class="small muted">予算残額</span><strong id="remaining">未設定</strong></div>
   </section>
-  <p class="small muted" style="text-align:center;line-height:1.6">試作品 v0.3.1 · 入力データはこの端末のブラウザ内に保存されます。<br>URL情報の取得はサイトの許可状況により成功しない場合があります。</p>
+  <p class="small muted" style="text-align:center;line-height:1.6">試作品 v0.3.3 · 入力データはこの端末のブラウザ内に保存されます。<br>URL情報の取得はサイトの許可状況により成功しない場合があります。</p>
 </main>
 <footer><div class="inner"><button class="secondary" id="exportBtn">データを書き出す</button><button class="secondary" id="importBtn">データを読み込む</button></div></footer>
 <input type="file" id="importFile" accept="application/json" hidden>
@@ -78,7 +78,7 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
       <div><label>実際の購入価格（任意）</label><input id="paidPrice" type="number" min="0" inputmode="numeric" placeholder="未入力なら定価"></div>
       <div><label>メーカー・ブランド</label><input id="maker" placeholder="メーカー名"></div>
       <div><label>数量</label><input id="quantity" type="number" min="0" inputmode="numeric" value="0"></div>
-      <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."><button type="button" class="secondary" id="fetchUrlBtn" style="margin-top:7px;width:100%">URLから商品情報を取得</button><div class="small muted" id="fetchHelp" style="margin-top:5px">商品名・価格・画像・JANなどを取得できるか試します。サイト側の制限で取得できない場合は、商品ページを開いて手入力できます。</div><button type="button" class="secondary" id="openUrlBtn" style="margin-top:7px;width:100%">商品ページを開く</button></div>
+      <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."><button type="button" class="secondary" id="fetchUrlBtn" style="margin-top:7px;width:100%">URLから商品情報を取得</button><div class="small muted" id="fetchHelp" style="margin-top:5px">商品名・価格・画像・JANなどを取得できるか試します。Shopify形式の商品ページは公開商品JSONも別途確認します。サイト側の制限で取得できない場合は手入力できます。</div><button type="button" class="secondary" id="openUrlBtn" style="margin-top:7px;width:100%">商品ページを開く</button></div>
       <div><label>JANコード</label><input id="jan" inputmode="numeric" placeholder="例：4535123..."></div>
       <div><label>発売日</label><input id="releaseDate" placeholder="例：2024年4月下旬"></div>
       <div><label>購入店舗（任意）</label><input id="purchaseStore" placeholder="例：アニメイト"></div><div><label>購入日（任意）</label><input id="purchaseDate" type="date"></div><div class="full"><label>商品画像URL（任意）</label><input id="imageUrl" type="url" placeholder="https://..."></div>
@@ -143,7 +143,7 @@ async function refresh(){
  });
 }
 async function changeQty(p,d){p.quantity=Math.max(0,Number(p.quantity||0)+d);await saveItem(p);}
-function openEditor(p){pendingPhoto=p?.photo||null;$('productForm').reset();$('pid').value=p?.id||'';$('name').value=p?.name||'';$('listPrice').value=p?.listPrice??'';$('paidPrice').value=p?.paidPrice??'';$('maker').value=p?.maker||'';$('quantity').value=p?.quantity??0;$('url').value=p?.url||'';$('jan').value=p?.jan||'';$('releaseDate').value=p?.releaseDate||'';$('imageUrl').value=p?.imageUrl||'';$('purchaseStore').value=p?.purchaseStore||'';$('purchaseDate').value=p?.purchaseDate||'';$('fetchHelp').textContent='商品名・価格・画像・JANなどを取得できるか試します。サイト側の制限で取得できない場合は、商品ページを開いて手入力できます。';$('status').value=p?.status||'購入予定';$('dlgTitle').textContent=p?'商品を編集':'商品を追加';$('editor').showModal();}
+function openEditor(p){pendingPhoto=p?.photo||null;$('productForm').reset();$('pid').value=p?.id||'';$('name').value=p?.name||'';$('listPrice').value=p?.listPrice??'';$('paidPrice').value=p?.paidPrice??'';$('maker').value=p?.maker||'';$('quantity').value=p?.quantity??0;$('url').value=p?.url||'';$('jan').value=p?.jan||'';$('releaseDate').value=p?.releaseDate||'';$('imageUrl').value=p?.imageUrl||'';$('purchaseStore').value=p?.purchaseStore||'';$('purchaseDate').value=p?.purchaseDate||'';$('fetchHelp').textContent='商品名・価格・画像・JANなどを取得できるか試します。Shopify形式の商品ページは公開商品JSONも別途確認します。サイト側の制限で取得できない場合は手入力できます。';$('status').value=p?.status||'購入予定';$('dlgTitle').textContent=p?'商品を編集':'商品を追加';$('editor').showModal();}
 function editItem(p){openEditor(p);}
 async function deleteItem(p){if(confirm('「'+p.name+'」を削除する？')){await req(db.transaction(STORE,'readwrite'),STORE,'delete',p.id);await refresh();}}
 function showZoom(p){$('zoomTitle').textContent=p.name;$('zoomImg').src=p.photo||p.imageUrl||'';$('zoom').showModal();}
@@ -191,45 +191,75 @@ function fillMeta(doc,baseUrl){
  return count;
 }
 async function tryShopifyProductJson(parsed){
- // Shopify's public product JSON is a useful fallback on stores that expose it.
+ // Shopifyの公開商品JSONを、商品ページHTMLの取得可否とは独立して試す。
  const match=parsed.pathname.match(/\/products\/([^/?#]+)/i);if(!match)return 0;
- const endpoint=new URL('/products/'+match[1]+'.js',parsed.origin);
- const res=await fetch(endpoint.href,{mode:'cors',credentials:'omit'});if(!res.ok)throw new Error('Shopify JSON HTTP '+res.status);
- const d=await res.json();let count=0;
- const set=(id,value,transform=v=>String(v))=>{if(value!==undefined&&value!==null&&String(value).trim()!==''&&!$(id).value){const v=transform(value);if(v){$(id).value=v;count++;}}};
- set('name',d.title);set('maker',d.vendor);set('listPrice',d.price,v=>{const n=Number(v);return Number.isFinite(n)&&n>0?Math.round(n/100):'';});
- set('imageUrl',d.featured_image||d.images?.[0],v=>absoluteUrl(v,parsed.origin));
- const variant=d.variants?.[0];set('jan',variant?.barcode||d.barcode);
- return count;
+ const slug=match[1];
+ const endpoints=[
+  new URL('/products/'+slug+'.js',parsed.origin),
+  new URL('/products/'+slug+'.js?'+new URLSearchParams({currency:'JPY'}).toString(),parsed.origin)
+ ];
+ let lastError=null;
+ for(const endpoint of endpoints){
+  try{
+   const res=await fetch(endpoint.href,{mode:'cors',credentials:'omit',cache:'no-store'});
+   if(!res.ok)throw new Error('HTTP '+res.status);
+   const d=await res.json();let count=0;
+   const set=(id,value,transform=v=>String(v))=>{
+    if(value!==undefined&&value!==null&&String(value).trim()!==''&&!$(id).value){
+     const v=transform(value);if(v!==undefined&&v!==null&&String(v).trim()!==''){$(id).value=v;count++;}
+    }
+   };
+   set('name',d.title);
+   set('maker',d.vendor);
+   set('listPrice',d.price,v=>{const n=Number(v);return Number.isFinite(n)&&n>0?Math.round(n/100):'';});
+   set('imageUrl',d.featured_image||d.images?.[0],v=>absoluteUrl(v,parsed.origin));
+   const variant=d.variants?.find(x=>x.barcode)||d.variants?.[0];
+   set('jan',variant?.barcode||d.barcode);
+   set('releaseDate',d.published_at,v=>String(v).slice(0,10));
+   if(count)return count;
+  }catch(err){lastError=err;}
+ }
+ if(lastError)throw lastError;
+ return 0;
 }
 $('fetchUrlBtn').onclick=async()=>{
  const u=$('url').value.trim(); if(!u){alert('先に商品ページURLを入力してね');return;}
- $('fetchHelp').textContent='商品ページの情報を確認中…';
+ $('fetchHelp').textContent='商品ページと公開商品データを確認中…';
+ let parsed;
+ try{parsed=new URL(u);if(!['http:','https:'].includes(parsed.protocol))throw new Error('URL形式が正しくありません');}
+ catch{$('fetchHelp').textContent='URLの形式を確認してね。https:// から始まるURLを入力してね。';return;}
+ let extracted=0, htmlAccessible=false, htmlError='', shopifyTried=false, shopifyError='';
+ // まず通常ページを試す。CORS等で失敗してもShopify JSONの確認は続ける。
  try{
-  const parsed=new URL(u); if(!['http:','https:'].includes(parsed.protocol))throw new Error('URL形式が正しくありません');
-  const res=await fetch(parsed.href,{mode:'cors',credentials:'omit'}); if(!res.ok) throw new Error('HTTP '+res.status);
-  const html=await res.text(); const doc=new DOMParser().parseFromString(html,'text/html');
-  let extracted=0;
+  const res=await fetch(parsed.href,{mode:'cors',credentials:'omit',cache:'no-store'});
+  if(!res.ok)throw new Error('HTTP '+res.status);
+  const html=await res.text();htmlAccessible=true;
+  const doc=new DOMParser().parseFromString(html,'text/html');
   for(const node of doc.querySelectorAll('script[type="application/ld+json"]')){
    try{const json=JSON.parse(node.textContent);for(const product of walkProductData(json))extracted+=fillFromProductData(product,parsed.href);}
    catch{}
   }
   extracted+=fillMeta(doc,parsed.href);
-  // Shopify product JSON fallback, only if structured data did not yield product fields.
-  if(extracted===0){try{extracted+=await tryShopifyProductJson(parsed);}catch{}}
   const ogTitle=doc.querySelector('meta[property="og:title"],meta[name="twitter:title"]')?.content?.trim()||'';
   const h1=doc.querySelector('main h1, article h1, h1')?.textContent?.trim()||'';
   const candidateTitle=ogTitle||h1;
   const genericTitle=/^(goods manager|home|ホーム|トップページ|商品一覧|公式サイト)$/i.test(candidateTitle);
   if(candidateTitle&&!genericTitle&&!$('name').value)$('name').value=candidateTitle;
-  if(extracted>0){
-   $('fetchHelp').textContent=`商品固有の情報を${extracted}項目取得したよ。入力欄を確認して保存してね。取得できなかった項目は手入力してね。`;
-  }else if(candidateTitle&&!genericTitle){
-   $('fetchHelp').textContent='ページタイトルは確認できたけれど、商品固有の情報（価格・メーカー・JAN・商品画像など）は取得できなかったよ。商品名も含めて確認し、必要な項目を手入力してね。';
-  }else{
-   $('fetchHelp').textContent='ページにはアクセスできたけれど、商品情報を確認できなかったよ。商品ページを開いて商品名・定価などを手入力してね。';
-  }
- }catch(err){$('fetchHelp').textContent='このサイトは外部からの読み込みを許可していないか、ページ取得に失敗したみたい。これはiPhoneやアプリの故障ではないよ。下の「商品ページを開く」でページを確認し、商品名・定価などを入力してね。URLはそのまま保存できるよ。';}
+ }catch(err){htmlError=err?.message||'ページ取得エラー';}
+ // Shopifyの商品JSONはHTML側のCORS失敗とは別に試す。
+ if(/\/products\//i.test(parsed.pathname)){
+  shopifyTried=true;
+  try{extracted+=await tryShopifyProductJson(parsed);}catch(err){shopifyError=err?.message||'公開商品JSONを取得できませんでした';}
+ }
+ if(extracted>0){
+  $('fetchHelp').textContent=`商品情報を${extracted}項目取得したよ。入力欄を確認して保存してね。既に入力されている項目は上書きしていないよ。`;
+ }else if(htmlAccessible){
+  $('fetchHelp').textContent='ページにはアクセスできたけれど、商品固有の情報を取得できなかったよ。商品名・定価・JANなどを確認して手入力してね。';
+ }else if(shopifyTried){
+  $('fetchHelp').textContent='商品ページの読み込みと公開商品データの取得ができなかったよ（サイト側の制限の可能性あり）。アプリの故障ではないよ。商品ページを開いて手入力してね。';
+ }else{
+  $('fetchHelp').textContent='このサイトは外部からの読み込みを許可していないか、ページ取得に失敗したみたい。商品ページを開いて商品名・定価などを手入力してね。URLはそのまま保存できるよ。';
+ }
 };
 $('openUrlBtn').onclick=()=>{const u=$('url').value.trim();if(!u){alert('先に商品ページURLを入力してね');return;}try{const x=new URL(u);if(x.protocol==='http:'||x.protocol==='https:')window.open(x.href,'_blank','noopener');else alert('https:// から始まるURLを入力してね');}catch{alert('URLの形式を確認してね');}};
 $('photo').addEventListener('change',async e=>{if(e.target.files[0])pendingPhoto=await compressImage(e.target.files[0]);});
