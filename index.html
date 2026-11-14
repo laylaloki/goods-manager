@@ -78,7 +78,7 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
       <div><label>実際の購入価格（任意）</label><input id="paidPrice" type="number" min="0" inputmode="numeric" placeholder="未入力なら定価"></div>
       <div><label>メーカー・ブランド</label><input id="maker" placeholder="メーカー名"></div>
       <div><label>数量</label><input id="quantity" type="number" min="0" inputmode="numeric" value="0"></div>
-      <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."><button type="button" class="secondary" id="fetchUrlBtn" style="margin-top:7px;width:100%">URLから商品情報を取得</button><div class="small muted" id="fetchHelp" style="margin-top:5px">商品名・価格・画像・JANなどを取得できるか試します。Shopify形式の商品ページは公開商品JSONも別途確認します。サイト側の制限で取得できない場合は手入力できます。</div><button type="button" class="secondary" id="openUrlBtn" style="margin-top:7px;width:100%">商品ページを開く</button></div>
+      <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."><button type="button" class="secondary" id="fetchUrlBtn" style="margin-top:7px;width:100%">URLから商品情報を取得</button><div class="small muted" id="fetchHelp" style="margin-top:5px">商品名・価格・画像・JANなどを取得できるか試します。商品ページの構造化データ・商品メタ情報・Shopify公開商品JSONを順に確認します。サイト側の制限で取得できない場合は手入力できます。</div><button type="button" class="secondary" id="openUrlBtn" style="margin-top:7px;width:100%">商品ページを開く</button></div>
       <div><label>JANコード</label><input id="jan" inputmode="numeric" placeholder="例：4535123..."></div>
       <div><label>発売日</label><input id="releaseDate" placeholder="例：2024年4月下旬"></div>
       <div><label>購入店舗（任意）</label><input id="purchaseStore" placeholder="例：アニメイト"></div><div><label>購入日（任意）</label><input id="purchaseDate" type="date"></div><div class="full"><label>商品画像URL（任意）</label><input id="imageUrl" type="url" placeholder="https://..."></div>
@@ -143,7 +143,7 @@ async function refresh(){
  });
 }
 async function changeQty(p,d){p.quantity=Math.max(0,Number(p.quantity||0)+d);await saveItem(p);}
-function openEditor(p){pendingPhoto=p?.photo||null;$('productForm').reset();$('pid').value=p?.id||'';$('name').value=p?.name||'';$('listPrice').value=p?.listPrice??'';$('paidPrice').value=p?.paidPrice??'';$('maker').value=p?.maker||'';$('quantity').value=p?.quantity??0;$('url').value=p?.url||'';$('jan').value=p?.jan||'';$('releaseDate').value=p?.releaseDate||'';$('imageUrl').value=p?.imageUrl||'';$('purchaseStore').value=p?.purchaseStore||'';$('purchaseDate').value=p?.purchaseDate||'';$('fetchHelp').textContent='商品名・価格・画像・JANなどを取得できるか試します。Shopify形式の商品ページは公開商品JSONも別途確認します。サイト側の制限で取得できない場合は手入力できます。';$('status').value=p?.status||'購入予定';$('dlgTitle').textContent=p?'商品を編集':'商品を追加';$('editor').showModal();}
+function openEditor(p){pendingPhoto=p?.photo||null;$('productForm').reset();$('pid').value=p?.id||'';$('name').value=p?.name||'';$('listPrice').value=p?.listPrice??'';$('paidPrice').value=p?.paidPrice??'';$('maker').value=p?.maker||'';$('quantity').value=p?.quantity??0;$('url').value=p?.url||'';$('jan').value=p?.jan||'';$('releaseDate').value=p?.releaseDate||'';$('imageUrl').value=p?.imageUrl||'';$('purchaseStore').value=p?.purchaseStore||'';$('purchaseDate').value=p?.purchaseDate||'';$('fetchHelp').textContent='商品名・価格・画像・JANなどを取得できるか試します。商品ページの構造化データ・商品メタ情報・Shopify公開商品JSONを順に確認します。サイト側の制限で取得できない場合は手入力できます。';$('status').value=p?.status||'購入予定';$('dlgTitle').textContent=p?'商品を編集':'商品を追加';$('editor').showModal();}
 function editItem(p){openEditor(p);}
 async function deleteItem(p){if(confirm('「'+p.name+'」を削除する？')){await req(db.transaction(STORE,'readwrite'),STORE,'delete',p.id);await refresh();}}
 function showZoom(p){$('zoomTitle').textContent=p.name;$('zoomImg').src=p.photo||p.imageUrl||'';$('zoom').showModal();}
@@ -152,8 +152,8 @@ function walkProductData(value, out=[], seen=new Set()){
  if(!value || typeof value!=='object' || seen.has(value)) return out;
  seen.add(value);
  if(Array.isArray(value)){value.forEach(v=>walkProductData(v,out,seen));return out;}
- const t=value['@type'];
- if(t==='Product'||(Array.isArray(t)&&t.includes('Product')))out.push(value);
+ const types=Array.isArray(value['@type'])?value['@type']:[value['@type']];
+ if(types.some(t=>String(t||'').split(/[\/#]/).pop().toLowerCase()==='product'))out.push(value);
  Object.values(value).forEach(v=>{if(v&&typeof v==='object')walkProductData(v,out,seen);});
  return out;
 }
@@ -168,7 +168,8 @@ function fillFromProductData(data, baseUrl){
  const offers=productOffer(data);
  const price=priceNumber(offers.price??offers.lowPrice??data.price);
  const sku=data.gtin13||data.gtin||data.gtin12||data.gtin8||data.sku||'';
- const date=data.releaseDate||data.datePublished||'';
+ // datePublished/published_at はページ公開日であり、商品の発売日とは限らないため採用しない。
+ const date=data.releaseDate||'';
  const set=(id,value,transform=v=>String(v))=>{if(value!==undefined&&value!==null&&String(value).trim()!==''&&!$(id).value){const v=transform(value);if(v){$(id).value=v;count++;}}};
  set('name',name);set('maker',brand);set('imageUrl',image,v=>absoluteUrl(v,baseUrl));set('listPrice',price,v=>priceNumber(v)||'');set('jan',sku);set('releaseDate',date,v=>String(v).slice(0,10));
  return count;
@@ -179,9 +180,17 @@ function fillMeta(doc,baseUrl){
  const set=(id,value,transform=v=>String(v))=>{if(value&&!$(id).value){const v=transform(value);if(v){$(id).value=v;count++;}}};
  // Product-specific metadata only. og:title is deliberately not treated as proof of a product.
  set('imageUrl',meta('og:image','twitter:image','image'),v=>absoluteUrl(v,baseUrl));
+ set('name',meta('product:name','name'));
  set('listPrice',meta('product:price:amount','og:price:amount','price'),v=>priceNumber(v)||'');
+ set('releaseDate',meta('product:release_date','releaseDate','release_date'));
  set('maker',meta('product:brand','brand'));
  set('jan',meta('product:gtin13','gtin13','gtin','sku'));
+ const itemName=doc.querySelector('[itemprop="name"]');
+ if(itemName&&!$('name').value){const v=itemName.getAttribute('content')||itemName.textContent.trim();if(v){$('name').value=v;count++;}}
+ const itemImage=doc.querySelector('[itemprop="image"]');
+ if(itemImage&&!$('imageUrl').value){const v=itemImage.getAttribute('content')||itemImage.getAttribute('src')||itemImage.getAttribute('href');if(v){$('imageUrl').value=absoluteUrl(v,baseUrl);count++;}}
+ const itemRelease=doc.querySelector('[itemprop="releaseDate"]');
+ if(itemRelease&&!$('releaseDate').value){const v=itemRelease.getAttribute('content')||itemRelease.getAttribute('datetime')||itemRelease.textContent.trim();if(v){$('releaseDate').value=v;count++;}}
  const itemPrice=doc.querySelector('[itemprop="price"]');
  if(itemPrice&&!$('listPrice').value){const v=priceNumber(itemPrice.getAttribute('content')||itemPrice.textContent);if(v){$('listPrice').value=v;count++;}}
  const itemBrand=doc.querySelector('[itemprop="brand"] [itemprop="name"],[itemprop="brand"]');
@@ -215,7 +224,7 @@ async function tryShopifyProductJson(parsed){
    set('imageUrl',d.featured_image||d.images?.[0],v=>absoluteUrl(v,parsed.origin));
    const variant=d.variants?.find(x=>x.barcode)||d.variants?.[0];
    set('jan',variant?.barcode||d.barcode);
-   set('releaseDate',d.published_at,v=>String(v).slice(0,10));
+   // Shopify published_at は商品ページの公開日。発売日欄には流用しない。
    if(count)return count;
   }catch(err){lastError=err;}
  }
@@ -224,7 +233,7 @@ async function tryShopifyProductJson(parsed){
 }
 $('fetchUrlBtn').onclick=async()=>{
  const u=$('url').value.trim(); if(!u){alert('先に商品ページURLを入力してね');return;}
- $('fetchHelp').textContent='商品ページと公開商品データを確認中…';
+ $('fetchHelp').textContent='商品ページの構造化データ・商品メタ情報・公開商品データを確認中…';
  let parsed;
  try{parsed=new URL(u);if(!['http:','https:'].includes(parsed.protocol))throw new Error('URL形式が正しくありません');}
  catch{$('fetchHelp').textContent='URLの形式を確認してね。https:// から始まるURLを入力してね。';return;}
