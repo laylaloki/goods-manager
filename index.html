@@ -64,7 +64,7 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
     <label for="budget">予算（円）</label><input id="budget" type="number" inputmode="numeric" placeholder="例：10000">
     <div class="row between" style="margin-top:10px"><span class="small muted">予算残額</span><strong id="remaining">未設定</strong></div>
   </section>
-  <p class="small muted" style="text-align:center;line-height:1.6">試作品 v0.1 · 入力データはこのブラウザ内に保存されます。<br>URLからの商品自動取り込み・会場別購入制限・バックアップは次の段階で追加します。</p>
+  <p class="small muted" style="text-align:center;line-height:1.6">試作品 v0.3 · 入力データはこの端末のブラウザ内に保存されます。<br>URL情報の取得はサイトの許可状況により成功しない場合があります。</p>
 </main>
 <footer><div class="inner"><button class="secondary" id="exportBtn">データを書き出す</button><button class="secondary" id="importBtn">データを読み込む</button></div></footer>
 <input type="file" id="importFile" accept="application/json" hidden>
@@ -78,7 +78,10 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
       <div><label>実際の購入価格（任意）</label><input id="paidPrice" type="number" min="0" inputmode="numeric" placeholder="未入力なら定価"></div>
       <div><label>メーカー・ブランド</label><input id="maker" placeholder="メーカー名"></div>
       <div><label>数量</label><input id="quantity" type="number" min="0" inputmode="numeric" value="0"></div>
-      <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."></div>
+      <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."><button type="button" class="secondary" id="fetchUrlBtn" style="margin-top:7px;width:100%">URLから商品情報を取得</button><div class="small muted" id="fetchHelp" style="margin-top:5px">商品名・価格・画像・JANなどを取得できるか試します。サイト側の制限で取得できない場合は、商品ページを開いて手入力できます。</div><button type="button" class="secondary" id="openUrlBtn" style="margin-top:7px;width:100%">商品ページを開く</button></div>
+      <div><label>JANコード</label><input id="jan" inputmode="numeric" placeholder="例：4535123..."></div>
+      <div><label>発売日</label><input id="releaseDate" placeholder="例：2024年4月下旬"></div>
+      <div><label>購入店舗（任意）</label><input id="purchaseStore" placeholder="例：アニメイト"></div><div><label>購入日（任意）</label><input id="purchaseDate" type="date"></div><div class="full"><label>商品画像URL（任意）</label><input id="imageUrl" type="url" placeholder="https://..."></div>
       <div class="full"><label>管理状況</label><select id="status"><option value="欲しい">欲しい</option><option value="予約済み">予約済み</option><option value="購入予定">購入予定</option><option value="購入済み">購入済み</option><option value="探し中">あとで探す</option></select></div>
       <div class="full"><label>商品画像</label><input id="photo" type="file" accept="image/*"><div class="small muted">画像は小さく圧縮して端末内に保存します。</div></div>
     </div>
@@ -119,7 +122,7 @@ async function refresh(){
  arr.forEach(p=>{
   const el=document.createElement('div');el.className='product';
   const thumb=document.createElement('div');thumb.className='thumb';
-  if(p.photo){const img=document.createElement('img');img.src=p.photo;img.alt=p.name;img.addEventListener('click',()=>showZoom(p));thumb.append(img);thumb.style.cursor='zoom-in';}
+  if(p.photo||p.imageUrl){const img=document.createElement('img');img.src=p.photo||p.imageUrl;img.alt=p.name;img.addEventListener('click',()=>showZoom(p));img.onerror=()=>{thumb.textContent='画像なし';};thumb.append(img);thumb.style.cursor='zoom-in';}
   else thumb.textContent='画像なし';
   const info=document.createElement('div');info.className='pinfo';
   const nm=document.createElement('div');nm.className='pname';nm.textContent=p.name;
@@ -140,20 +143,68 @@ async function refresh(){
  });
 }
 async function changeQty(p,d){p.quantity=Math.max(0,Number(p.quantity||0)+d);await saveItem(p);}
-function openEditor(p){pendingPhoto=p?.photo||null;$('productForm').reset();$('pid').value=p?.id||'';$('name').value=p?.name||'';$('listPrice').value=p?.listPrice??'';$('paidPrice').value=p?.paidPrice??'';$('maker').value=p?.maker||'';$('quantity').value=p?.quantity??0;$('url').value=p?.url||'';$('status').value=p?.status||'購入予定';$('dlgTitle').textContent=p?'商品を編集':'商品を追加';$('editor').showModal();}
+function openEditor(p){pendingPhoto=p?.photo||null;$('productForm').reset();$('pid').value=p?.id||'';$('name').value=p?.name||'';$('listPrice').value=p?.listPrice??'';$('paidPrice').value=p?.paidPrice??'';$('maker').value=p?.maker||'';$('quantity').value=p?.quantity??0;$('url').value=p?.url||'';$('jan').value=p?.jan||'';$('releaseDate').value=p?.releaseDate||'';$('imageUrl').value=p?.imageUrl||'';$('purchaseStore').value=p?.purchaseStore||'';$('purchaseDate').value=p?.purchaseDate||'';$('fetchHelp').textContent='商品名・価格・画像・JANなどを取得できるか試します。サイト側の制限で取得できない場合は、商品ページを開いて手入力できます。';$('status').value=p?.status||'購入予定';$('dlgTitle').textContent=p?'商品を編集':'商品を追加';$('editor').showModal();}
 function editItem(p){openEditor(p);}
 async function deleteItem(p){if(confirm('「'+p.name+'」を削除する？')){await req(db.transaction(STORE,'readwrite'),STORE,'delete',p.id);await refresh();}}
-function showZoom(p){$('zoomTitle').textContent=p.name;$('zoomImg').src=p.photo;$('zoom').showModal();}
+function showZoom(p){$('zoomTitle').textContent=p.name;$('zoomImg').src=p.photo||p.imageUrl||'';$('zoom').showModal();}
 async function compressImage(file){return new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement('canvas'),scale=Math.min(1,600/Math.max(img.width,img.height));c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c.toDataURL('image/jpeg',.68));};img.onerror=reject;img.src=url;});}
+function walkProductData(value, out=[]){
+ if(Array.isArray(value)){value.forEach(v=>walkProductData(v,out));return out;}
+ if(value&&typeof value==='object'){
+  const t=value['@type']; if(t==='Product'||(Array.isArray(t)&&t.includes('Product')))out.push(value);
+  if(value['@graph'])walkProductData(value['@graph'],out);
+  if(value.itemListElement)walkProductData(value.itemListElement,out);
+ }
+ return out;
+}
+function fillFromProductData(data, baseUrl){
+ const name=data.name||data.title||'';
+ const image=typeof data.image==='string'?data.image:Array.isArray(data.image)?(typeof data.image[0]==='string'?data.image[0]:data.image[0]?.url):data.image?.url;
+ const brand=typeof data.brand==='string'?data.brand:data.brand?.name;
+ const offers=Array.isArray(data.offers)?data.offers[0]:(data.offers||{});
+ const price=offers.price||offers.lowPrice||data.price;
+ const sku=data.gtin13||data.gtin||data.gtin12||data.sku||data.mpn||'';
+ const date=data.releaseDate||data.datePublished||'';
+ if(name&&!$('name').value)$('name').value=name;
+ if(brand&&!$('maker').value)$('maker').value=brand;
+ if(image&&!$('imageUrl').value){try{$('imageUrl').value=new URL(image,baseUrl).href;}catch{}}
+ if(price&&!$('listPrice').value){const n=Number(String(price).replace(/[^0-9.]/g,''));if(n)$('listPrice').value=Math.round(n);}
+ if(sku&&!$('jan').value)$('jan').value=String(sku);
+ if(date&&!$('releaseDate').value)$('releaseDate').value=String(date).slice(0,10);
+ return !!(name||image||price||brand||sku||date);
+}
+$('fetchUrlBtn').onclick=async()=>{
+ const u=$('url').value.trim(); if(!u){alert('先に商品ページURLを入力してね');return;}
+ $('fetchHelp').textContent='商品ページの情報を確認中…';
+ try{
+  const parsed=new URL(u); if(!['http:','https:'].includes(parsed.protocol))throw new Error('URL形式が正しくありません');
+  const res=await fetch(parsed.href,{mode:'cors',credentials:'omit'}); if(!res.ok) throw new Error('HTTP '+res.status);
+  const html=await res.text(); const doc=new DOMParser().parseFromString(html,'text/html');
+  const meta=(...keys)=>{for(const k of keys){const e=doc.querySelector(`meta[property="${k}"],meta[name="${k}"]`);if(e?.content)return e.content;}return '';};
+  let found=false;
+  for(const node of doc.querySelectorAll('script[type="application/ld+json"]')){try{const json=JSON.parse(node.textContent);const products=walkProductData(json);if(products.length){found=fillFromProductData(products[0],parsed.href)||found;}}catch{}}
+  const title=meta('og:title','twitter:title')||doc.querySelector('h1')?.textContent?.trim()||doc.title;
+  const image=meta('og:image','twitter:image');
+  const price=meta('product:price:amount','og:price:amount');
+  const brand=meta('product:brand');
+  if(title&&!$('name').value)$('name').value=title.trim();
+  if(image&&!$('imageUrl').value)$('imageUrl').value=new URL(image,parsed.href).href;
+  if(price&&!$('listPrice').value){const n=Number(price.replace(/[^0-9.]/g,''));if(n)$('listPrice').value=Math.round(n);}
+  if(brand&&!$('maker').value)$('maker').value=brand;
+  found=found||!!(title||image||price||brand);
+  $('fetchHelp').textContent=found?'ページから取得できた情報を入力欄に反映したよ。内容を確認して保存してね。':'ページにはアクセスできたけれど、商品情報を見つけられなかったよ。商品名などを確認して入力してね。';
+ }catch(err){$('fetchHelp').textContent='このサイトは外部からの読み込みを許可していないみたい。これはiPhoneやアプリの故障ではないよ。下の「商品ページを開く」でページを確認し、商品名・定価などを入力してね。URLはそのまま保存できるよ。';}
+};
+$('openUrlBtn').onclick=()=>{const u=$('url').value.trim();if(!u){alert('先に商品ページURLを入力してね');return;}try{const x=new URL(u);if(x.protocol==='http:'||x.protocol==='https:')window.open(x.href,'_blank','noopener');else alert('https:// から始まるURLを入力してね');}catch{alert('URLの形式を確認してね');}};
 $('photo').addEventListener('change',async e=>{if(e.target.files[0])pendingPhoto=await compressImage(e.target.files[0]);});
-$('productForm').addEventListener('submit',async e=>{e.preventDefault();const id=$('pid').value||crypto.randomUUID();const old=items.find(x=>x.id===id)||{};const p={...old,id,type:mode,name:$('name').value.trim(),listPrice:$('listPrice').value===''?0:Number($('listPrice').value),paidPrice:$('paidPrice').value===''?'':Number($('paidPrice').value),maker:$('maker').value.trim(),quantity:Math.max(0,Number($('quantity').value||0)),url:$('url').value.trim(),status:$('status').value,photo:pendingPhoto};await saveItem(p);$('editor').close();});
+$('productForm').addEventListener('submit',async e=>{e.preventDefault();const id=$('pid').value||crypto.randomUUID();const old=items.find(x=>x.id===id)||{};const p={...old,id,type:mode,name:$('name').value.trim(),listPrice:$('listPrice').value===''?0:Number($('listPrice').value),paidPrice:$('paidPrice').value===''?'':Number($('paidPrice').value),maker:$('maker').value.trim(),quantity:Math.max(0,Number($('quantity').value||0)),url:$('url').value.trim(),jan:$('jan').value.trim(),releaseDate:$('releaseDate').value.trim(),imageUrl:$('imageUrl').value.trim(),status:$('status').value,purchaseStore:$('purchaseStore').value.trim(),purchaseDate:$('purchaseDate').value,photo:pendingPhoto};await saveItem(p);$('editor').close();});
 $('addBtn').onclick=()=>openEditor();$('closeDlg').onclick=$('cancelBtn').onclick=()=>$('editor').close();$('closeZoom').onclick=()=>$('zoom').close();
 $('eventTab').onclick=()=>setMode('event');$('regularTab').onclick=()=>setMode('regular');
 function setMode(m){mode=m;$('eventTab').classList.toggle('active',m==='event');$('regularTab').classList.toggle('active',m==='regular');refresh();}
 $('search').oninput=refresh;$('sort').onchange=refresh;
 $('budget').onchange=async()=>{settings.budget[mode]=$('budget').value;await saveSetting('budget',settings.budget);refresh();};
 $('eventNameBtn').onclick=async()=>{const n=prompt('イベント名を入力してね',settings.eventName||'');if(n!==null){settings.eventName=n;await saveSetting('eventName',n);refresh();}};
-$('exportBtn').onclick=async()=>{const data={version:1,items:await allItems(),settings};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='goods-manager-backup.json';a.click();URL.revokeObjectURL(a.href);};
+$('exportBtn').onclick=async()=>{const data={version:2,items:await allItems(),settings,exportedAt:new Date().toISOString()};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='goods-manager-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);};
 $('importBtn').onclick=()=>$('importFile').click();
 $('importFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!Array.isArray(data.items))throw Error('形式が違います');const tx=db.transaction([STORE,SETTINGS],'readwrite');data.items.forEach(p=>tx.objectStore(STORE).put(p));if(data.settings){settings=data.settings;Object.entries(settings).forEach(([k,v])=>tx.objectStore(SETTINGS).put({key:k,value:v}));}tx.oncomplete=refresh;alert('読み込みました');}catch(err){alert('読み込めませんでした：'+err.message)}e.target.value='';};
 (async()=>{db=await openDB();await loadSettings();if('serviceWorker'in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});await refresh();})();

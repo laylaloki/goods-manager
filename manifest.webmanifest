@@ -1,9 +1,1 @@
-{
-  "name": "GOODS MANAGER",
-  "short_name": "GOODS",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#f6f4f0",
-  "theme_color": "#f6f4f0",
-  "lang": "ja"
-}
+{"name":"GOODS MANAGER","short_name":"GOODS","start_url":"./","display":"standalone","background_color":"#f6f4f0","theme_color":"#f6f4f0","lang":"ja"}
