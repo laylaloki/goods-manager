@@ -157,22 +157,50 @@ function walkProductData(value, out=[], seen=new Set()){
  Object.values(value).forEach(v=>{if(v&&typeof v==='object')walkProductData(v,out,seen);});
  return out;
 }
+function absoluteUrl(value,base){try{return new URL(typeof value==='object'?(value.url||value['@id']||''):value,base).href;}catch{return '';}}
+function priceNumber(value){if(value===undefined||value===null)return 0;const n=Number(String(value).replace(/[^0-9.]/g,''));return Number.isFinite(n)&&n>0?Math.round(n):0;}
+function productOffer(data){let o=data?.offers||{};if(Array.isArray(o))o=o[0]||{};if(o?.offers)o=Array.isArray(o.offers)?o.offers[0]:o.offers;return o||{};}
 function fillFromProductData(data, baseUrl){
+ let count=0;
  const name=typeof data.name==='string'?data.name.trim():'';
- const image=typeof data.image==='string'?data.image:Array.isArray(data.image)?(typeof data.image[0]==='string'?data.image[0]:data.image[0]?.url):data.image?.url;
+ const image=Array.isArray(data.image)?data.image[0]:data.image;
  const brand=typeof data.brand==='string'?data.brand:data.brand?.name;
- const offers=Array.isArray(data.offers)?data.offers[0]:(data.offers||{});
- const price=offers.price||offers.lowPrice||data.price;
+ const offers=productOffer(data);
+ const price=priceNumber(offers.price??offers.lowPrice??data.price);
  const sku=data.gtin13||data.gtin||data.gtin12||data.gtin8||data.sku||'';
- const date=data.releaseDate||'';
- let changed=false;
- if(name&&!$('name').value){$('name').value=name;changed=true;}
- if(brand&&!$('maker').value){$('maker').value=brand;changed=true;}
- if(image&&!$('imageUrl').value){try{$('imageUrl').value=new URL(typeof image==='object'?image.url:image,baseUrl).href;changed=true;}catch{}}
- if(price!==undefined&&price!==null&&String(price).trim()!==''&&!$('listPrice').value){const n=Number(String(price).replace(/[^0-9.]/g,''));if(Number.isFinite(n)&&n>0){$('listPrice').value=Math.round(n);changed=true;}}
- if(sku&&!$('jan').value){$('jan').value=String(sku);changed=true;}
- if(date&&!$('releaseDate').value){$('releaseDate').value=String(date).slice(0,10);changed=true;}
- return changed;
+ const date=data.releaseDate||data.datePublished||'';
+ const set=(id,value,transform=v=>String(v))=>{if(value!==undefined&&value!==null&&String(value).trim()!==''&&!$(id).value){const v=transform(value);if(v){$(id).value=v;count++;}}};
+ set('name',name);set('maker',brand);set('imageUrl',image,v=>absoluteUrl(v,baseUrl));set('listPrice',price,v=>priceNumber(v)||'');set('jan',sku);set('releaseDate',date,v=>String(v).slice(0,10));
+ return count;
+}
+function fillMeta(doc,baseUrl){
+ let count=0;
+ const meta=(...keys)=>{for(const k of keys){const e=doc.querySelector(`meta[property="${k}"],meta[name="${k}"],meta[itemprop="${k}"]`);if(e?.content)return e.content.trim();}return '';};
+ const set=(id,value,transform=v=>String(v))=>{if(value&&!$(id).value){const v=transform(value);if(v){$(id).value=v;count++;}}};
+ // Product-specific metadata only. og:title is deliberately not treated as proof of a product.
+ set('imageUrl',meta('og:image','twitter:image','image'),v=>absoluteUrl(v,baseUrl));
+ set('listPrice',meta('product:price:amount','og:price:amount','price'),v=>priceNumber(v)||'');
+ set('maker',meta('product:brand','brand'));
+ set('jan',meta('product:gtin13','gtin13','gtin','sku'));
+ const itemPrice=doc.querySelector('[itemprop="price"]');
+ if(itemPrice&&!$('listPrice').value){const v=priceNumber(itemPrice.getAttribute('content')||itemPrice.textContent);if(v){$('listPrice').value=v;count++;}}
+ const itemBrand=doc.querySelector('[itemprop="brand"] [itemprop="name"],[itemprop="brand"]');
+ if(itemBrand&&!$('maker').value){const v=itemBrand.getAttribute('content')||itemBrand.textContent.trim();if(v){$('maker').value=v;count++;}}
+ const itemSku=doc.querySelector('[itemprop="gtin13"],[itemprop="gtin"],[itemprop="sku"]');
+ if(itemSku&&!$('jan').value){const v=itemSku.getAttribute('content')||itemSku.textContent.trim();if(v){$('jan').value=v;count++;}}
+ return count;
+}
+async function tryShopifyProductJson(parsed){
+ // Shopify's public product JSON is a useful fallback on stores that expose it.
+ const match=parsed.pathname.match(/\/products\/([^/?#]+)/i);if(!match)return 0;
+ const endpoint=new URL('/products/'+match[1]+'.js',parsed.origin);
+ const res=await fetch(endpoint.href,{mode:'cors',credentials:'omit'});if(!res.ok)throw new Error('Shopify JSON HTTP '+res.status);
+ const d=await res.json();let count=0;
+ const set=(id,value,transform=v=>String(v))=>{if(value!==undefined&&value!==null&&String(value).trim()!==''&&!$(id).value){const v=transform(value);if(v){$(id).value=v;count++;}}};
+ set('name',d.title);set('maker',d.vendor);set('listPrice',d.price,v=>{const n=Number(v);return Number.isFinite(n)&&n>0?Math.round(n/100):'';});
+ set('imageUrl',d.featured_image||d.images?.[0],v=>absoluteUrl(v,parsed.origin));
+ const variant=d.variants?.[0];set('jan',variant?.barcode||d.barcode);
+ return count;
 }
 $('fetchUrlBtn').onclick=async()=>{
  const u=$('url').value.trim(); if(!u){alert('先に商品ページURLを入力してね');return;}
@@ -181,33 +209,27 @@ $('fetchUrlBtn').onclick=async()=>{
   const parsed=new URL(u); if(!['http:','https:'].includes(parsed.protocol))throw new Error('URL形式が正しくありません');
   const res=await fetch(parsed.href,{mode:'cors',credentials:'omit'}); if(!res.ok) throw new Error('HTTP '+res.status);
   const html=await res.text(); const doc=new DOMParser().parseFromString(html,'text/html');
-  const meta=(...keys)=>{for(const k of keys){const e=doc.querySelector(`meta[property="${k}"],meta[name="${k}"]`);if(e?.content)return e.content.trim();}return '';};
-  let productDataFound=false, productMetaFound=false;
+  let extracted=0;
   for(const node of doc.querySelectorAll('script[type="application/ld+json"]')){
-   try{const json=JSON.parse(node.textContent);const products=walkProductData(json);for(const product of products){if(fillFromProductData(product,parsed.href))productDataFound=true;}}
+   try{const json=JSON.parse(node.textContent);for(const product of walkProductData(json))extracted+=fillFromProductData(product,parsed.href);}
    catch{}
   }
-  const ogTitle=meta('og:title','twitter:title');
+  extracted+=fillMeta(doc,parsed.href);
+  // Shopify product JSON fallback, only if structured data did not yield product fields.
+  if(extracted===0){try{extracted+=await tryShopifyProductJson(parsed);}catch{}}
+  const ogTitle=doc.querySelector('meta[property="og:title"],meta[name="twitter:title"]')?.content?.trim()||'';
   const h1=doc.querySelector('main h1, article h1, h1')?.textContent?.trim()||'';
   const candidateTitle=ogTitle||h1;
   const genericTitle=/^(goods manager|home|ホーム|トップページ|商品一覧|公式サイト)$/i.test(candidateTitle);
   if(candidateTitle&&!genericTitle&&!$('name').value)$('name').value=candidateTitle;
-  const image=meta('og:image','twitter:image');
-  const price=meta('product:price:amount','og:price:amount');
-  const brand=meta('product:brand');
-  const sku=meta('product:retailer_item_id','product:gtin13');
-  if(image&&!$('imageUrl').value){try{$('imageUrl').value=new URL(image,parsed.href).href;productMetaFound=true;}catch{}}
-  if(price&&!$('listPrice').value){const n=Number(price.replace(/[^0-9.]/g,''));if(Number.isFinite(n)&&n>0){$('listPrice').value=Math.round(n);productMetaFound=true;}}
-  if(brand&&!$('maker').value){$('maker').value=brand;productMetaFound=true;}
-  if(sku&&!$('jan').value){$('jan').value=sku;productMetaFound=true;}
-  if(productDataFound||productMetaFound){
-   $('fetchHelp').textContent='商品情報を取得できた項目を入力欄に反映したよ。内容を確認して保存してね。取得できなかった項目は手入力してね。';
+  if(extracted>0){
+   $('fetchHelp').textContent=`商品固有の情報を${extracted}項目取得したよ。入力欄を確認して保存してね。取得できなかった項目は手入力してね。`;
   }else if(candidateTitle&&!genericTitle){
-   $('fetchHelp').textContent='ページタイトルだけ確認できたよ。商品情報（価格・メーカー・JANなど）は確認できなかったので、商品名も含めて内容を確認し、必要な項目を手入力してね。';
+   $('fetchHelp').textContent='ページタイトルは確認できたけれど、商品固有の情報（価格・メーカー・JAN・商品画像など）は取得できなかったよ。商品名も含めて確認し、必要な項目を手入力してね。';
   }else{
    $('fetchHelp').textContent='ページにはアクセスできたけれど、商品情報を確認できなかったよ。商品ページを開いて商品名・定価などを手入力してね。';
   }
- }catch(err){$('fetchHelp').textContent='このサイトは外部からの読み込みを許可していないみたい。これはiPhoneやアプリの故障ではないよ。下の「商品ページを開く」でページを確認し、商品名・定価などを入力してね。URLはそのまま保存できるよ。';}
+ }catch(err){$('fetchHelp').textContent='このサイトは外部からの読み込みを許可していないか、ページ取得に失敗したみたい。これはiPhoneやアプリの故障ではないよ。下の「商品ページを開く」でページを確認し、商品名・定価などを入力してね。URLはそのまま保存できるよ。';}
 };
 $('openUrlBtn').onclick=()=>{const u=$('url').value.trim();if(!u){alert('先に商品ページURLを入力してね');return;}try{const x=new URL(u);if(x.protocol==='http:'||x.protocol==='https:')window.open(x.href,'_blank','noopener');else alert('https:// から始まるURLを入力してね');}catch{alert('URLの形式を確認してね');}};
 $('photo').addEventListener('change',async e=>{if(e.target.files[0])pendingPhoto=await compressImage(e.target.files[0]);});
