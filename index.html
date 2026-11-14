@@ -80,7 +80,7 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
       <div><label>数量</label><input id="quantity" type="number" min="0" inputmode="numeric" value="0"></div>
       <div class="full"><label>商品ページURL</label><input id="url" type="url" placeholder="https://..."><button type="button" class="secondary" id="fetchUrlBtn" style="margin-top:7px;width:100%">URLから商品情報を取得</button><div class="small muted" id="fetchHelp" style="margin-top:5px">商品名・価格・画像・JANなどを取得できるか試します。商品ページの構造化データ・商品メタ情報・Shopify公開商品JSONを順に確認します。サイト側の制限で取得できない場合は手入力できます。</div><button type="button" class="secondary" id="openUrlBtn" style="margin-top:7px;width:100%">商品ページを開く</button></div>
       <div><label>JANコード</label><input id="jan" inputmode="numeric" placeholder="例：4535123..."></div>
-      <div><label>発売日</label><input id="releaseDate" placeholder="例：2024年4月下旬"></div>
+      <div><label>発売日／お届け予定日</label><input id="releaseDate" placeholder="例：2026年1月30日"><div class="small muted">商品ページに発売日がない場合、お届け予定日が入ることがあります。</div></div>
       <div><label>購入店舗（任意）</label><input id="purchaseStore" placeholder="例：アニメイト"></div><div><label>購入日（任意）</label><input id="purchaseDate" type="date"></div><div class="full"><label>商品画像URL（任意）</label><input id="imageUrl" type="url" placeholder="https://..."></div>
       <div class="full"><label>管理状況</label><select id="status"><option value="欲しい">欲しい</option><option value="予約済み">予約済み</option><option value="購入予定">購入予定</option><option value="購入済み">購入済み</option><option value="探し中">あとで探す</option></select></div>
       <div class="full"><label>商品画像</label><input id="photo" type="file" accept="image/*"><div class="small muted">画像は小さく圧縮して端末内に保存します。</div></div>
