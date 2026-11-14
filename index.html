@@ -64,7 +64,7 @@ footer .inner{max-width:760px;margin:auto;display:flex;gap:8px}footer button{fle
     <label for="budget">予算（円）</label><input id="budget" type="number" inputmode="numeric" placeholder="例：10000">
     <div class="row between" style="margin-top:10px"><span class="small muted">予算残額</span><strong id="remaining">未設定</strong></div>
   </section>
-  <p class="small muted" style="text-align:center;line-height:1.6">試作品 v0.3 · 入力データはこの端末のブラウザ内に保存されます。<br>URL情報の取得はサイトの許可状況により成功しない場合があります。</p>
+  <p class="small muted" style="text-align:center;line-height:1.6">試作品 v0.3.1 · 入力データはこの端末のブラウザ内に保存されます。<br>URL情報の取得はサイトの許可状況により成功しない場合があります。</p>
 </main>
 <footer><div class="inner"><button class="secondary" id="exportBtn">データを書き出す</button><button class="secondary" id="importBtn">データを読み込む</button></div></footer>
 <input type="file" id="importFile" accept="application/json" hidden>
@@ -148,30 +148,31 @@ function editItem(p){openEditor(p);}
 async function deleteItem(p){if(confirm('「'+p.name+'」を削除する？')){await req(db.transaction(STORE,'readwrite'),STORE,'delete',p.id);await refresh();}}
 function showZoom(p){$('zoomTitle').textContent=p.name;$('zoomImg').src=p.photo||p.imageUrl||'';$('zoom').showModal();}
 async function compressImage(file){return new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement('canvas'),scale=Math.min(1,600/Math.max(img.width,img.height));c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c.toDataURL('image/jpeg',.68));};img.onerror=reject;img.src=url;});}
-function walkProductData(value, out=[]){
- if(Array.isArray(value)){value.forEach(v=>walkProductData(v,out));return out;}
- if(value&&typeof value==='object'){
-  const t=value['@type']; if(t==='Product'||(Array.isArray(t)&&t.includes('Product')))out.push(value);
-  if(value['@graph'])walkProductData(value['@graph'],out);
-  if(value.itemListElement)walkProductData(value.itemListElement,out);
- }
+function walkProductData(value, out=[], seen=new Set()){
+ if(!value || typeof value!=='object' || seen.has(value)) return out;
+ seen.add(value);
+ if(Array.isArray(value)){value.forEach(v=>walkProductData(v,out,seen));return out;}
+ const t=value['@type'];
+ if(t==='Product'||(Array.isArray(t)&&t.includes('Product')))out.push(value);
+ Object.values(value).forEach(v=>{if(v&&typeof v==='object')walkProductData(v,out,seen);});
  return out;
 }
 function fillFromProductData(data, baseUrl){
- const name=data.name||data.title||'';
+ const name=typeof data.name==='string'?data.name.trim():'';
  const image=typeof data.image==='string'?data.image:Array.isArray(data.image)?(typeof data.image[0]==='string'?data.image[0]:data.image[0]?.url):data.image?.url;
  const brand=typeof data.brand==='string'?data.brand:data.brand?.name;
  const offers=Array.isArray(data.offers)?data.offers[0]:(data.offers||{});
  const price=offers.price||offers.lowPrice||data.price;
- const sku=data.gtin13||data.gtin||data.gtin12||data.sku||data.mpn||'';
- const date=data.releaseDate||data.datePublished||'';
- if(name&&!$('name').value)$('name').value=name;
- if(brand&&!$('maker').value)$('maker').value=brand;
- if(image&&!$('imageUrl').value){try{$('imageUrl').value=new URL(image,baseUrl).href;}catch{}}
- if(price&&!$('listPrice').value){const n=Number(String(price).replace(/[^0-9.]/g,''));if(n)$('listPrice').value=Math.round(n);}
- if(sku&&!$('jan').value)$('jan').value=String(sku);
- if(date&&!$('releaseDate').value)$('releaseDate').value=String(date).slice(0,10);
- return !!(name||image||price||brand||sku||date);
+ const sku=data.gtin13||data.gtin||data.gtin12||data.gtin8||data.sku||'';
+ const date=data.releaseDate||'';
+ let changed=false;
+ if(name&&!$('name').value){$('name').value=name;changed=true;}
+ if(brand&&!$('maker').value){$('maker').value=brand;changed=true;}
+ if(image&&!$('imageUrl').value){try{$('imageUrl').value=new URL(typeof image==='object'?image.url:image,baseUrl).href;changed=true;}catch{}}
+ if(price!==undefined&&price!==null&&String(price).trim()!==''&&!$('listPrice').value){const n=Number(String(price).replace(/[^0-9.]/g,''));if(Number.isFinite(n)&&n>0){$('listPrice').value=Math.round(n);changed=true;}}
+ if(sku&&!$('jan').value){$('jan').value=String(sku);changed=true;}
+ if(date&&!$('releaseDate').value){$('releaseDate').value=String(date).slice(0,10);changed=true;}
+ return changed;
 }
 $('fetchUrlBtn').onclick=async()=>{
  const u=$('url').value.trim(); if(!u){alert('先に商品ページURLを入力してね');return;}
@@ -180,19 +181,32 @@ $('fetchUrlBtn').onclick=async()=>{
   const parsed=new URL(u); if(!['http:','https:'].includes(parsed.protocol))throw new Error('URL形式が正しくありません');
   const res=await fetch(parsed.href,{mode:'cors',credentials:'omit'}); if(!res.ok) throw new Error('HTTP '+res.status);
   const html=await res.text(); const doc=new DOMParser().parseFromString(html,'text/html');
-  const meta=(...keys)=>{for(const k of keys){const e=doc.querySelector(`meta[property="${k}"],meta[name="${k}"]`);if(e?.content)return e.content;}return '';};
-  let found=false;
-  for(const node of doc.querySelectorAll('script[type="application/ld+json"]')){try{const json=JSON.parse(node.textContent);const products=walkProductData(json);if(products.length){found=fillFromProductData(products[0],parsed.href)||found;}}catch{}}
-  const title=meta('og:title','twitter:title')||doc.querySelector('h1')?.textContent?.trim()||doc.title;
+  const meta=(...keys)=>{for(const k of keys){const e=doc.querySelector(`meta[property="${k}"],meta[name="${k}"]`);if(e?.content)return e.content.trim();}return '';};
+  let productDataFound=false, productMetaFound=false;
+  for(const node of doc.querySelectorAll('script[type="application/ld+json"]')){
+   try{const json=JSON.parse(node.textContent);const products=walkProductData(json);for(const product of products){if(fillFromProductData(product,parsed.href))productDataFound=true;}}
+   catch{}
+  }
+  const ogTitle=meta('og:title','twitter:title');
+  const h1=doc.querySelector('main h1, article h1, h1')?.textContent?.trim()||'';
+  const candidateTitle=ogTitle||h1;
+  const genericTitle=/^(goods manager|home|ホーム|トップページ|商品一覧|公式サイト)$/i.test(candidateTitle);
+  if(candidateTitle&&!genericTitle&&!$('name').value)$('name').value=candidateTitle;
   const image=meta('og:image','twitter:image');
   const price=meta('product:price:amount','og:price:amount');
   const brand=meta('product:brand');
-  if(title&&!$('name').value)$('name').value=title.trim();
-  if(image&&!$('imageUrl').value)$('imageUrl').value=new URL(image,parsed.href).href;
-  if(price&&!$('listPrice').value){const n=Number(price.replace(/[^0-9.]/g,''));if(n)$('listPrice').value=Math.round(n);}
-  if(brand&&!$('maker').value)$('maker').value=brand;
-  found=found||!!(title||image||price||brand);
-  $('fetchHelp').textContent=found?'ページから取得できた情報を入力欄に反映したよ。内容を確認して保存してね。':'ページにはアクセスできたけれど、商品情報を見つけられなかったよ。商品名などを確認して入力してね。';
+  const sku=meta('product:retailer_item_id','product:gtin13');
+  if(image&&!$('imageUrl').value){try{$('imageUrl').value=new URL(image,parsed.href).href;productMetaFound=true;}catch{}}
+  if(price&&!$('listPrice').value){const n=Number(price.replace(/[^0-9.]/g,''));if(Number.isFinite(n)&&n>0){$('listPrice').value=Math.round(n);productMetaFound=true;}}
+  if(brand&&!$('maker').value){$('maker').value=brand;productMetaFound=true;}
+  if(sku&&!$('jan').value){$('jan').value=sku;productMetaFound=true;}
+  if(productDataFound||productMetaFound){
+   $('fetchHelp').textContent='商品情報を取得できた項目を入力欄に反映したよ。内容を確認して保存してね。取得できなかった項目は手入力してね。';
+  }else if(candidateTitle&&!genericTitle){
+   $('fetchHelp').textContent='ページタイトルだけ確認できたよ。商品情報（価格・メーカー・JANなど）は確認できなかったので、商品名も含めて内容を確認し、必要な項目を手入力してね。';
+  }else{
+   $('fetchHelp').textContent='ページにはアクセスできたけれど、商品情報を確認できなかったよ。商品ページを開いて商品名・定価などを手入力してね。';
+  }
  }catch(err){$('fetchHelp').textContent='このサイトは外部からの読み込みを許可していないみたい。これはiPhoneやアプリの故障ではないよ。下の「商品ページを開く」でページを確認し、商品名・定価などを入力してね。URLはそのまま保存できるよ。';}
 };
 $('openUrlBtn').onclick=()=>{const u=$('url').value.trim();if(!u){alert('先に商品ページURLを入力してね');return;}try{const x=new URL(u);if(x.protocol==='http:'||x.protocol==='https:')window.open(x.href,'_blank','noopener');else alert('https:// から始まるURLを入力してね');}catch{alert('URLの形式を確認してね');}};
